@@ -35,6 +35,15 @@ def test_tool_output_wraps_result_as_function_call_output_item():
     }
 
 
+def test_function_call_item_lets_a_late_result_arrive_as_tool_output():
+    ev = rt.function_call("job1_result", "call_person", {"who": "Alex"})
+    assert ev == {
+        "type": "conversation.item.create",
+        "item": {"type": "function_call", "call_id": "job1_result", "name": "call_person",
+                 "arguments": json.dumps({"who": "Alex"})},
+    }
+
+
 def test_truncate_clamps_negative_positions_to_zero():
     assert rt.truncate("item_1", -50) == {
         "type": "conversation.item.truncate",

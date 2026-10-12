@@ -96,6 +96,19 @@ class FakeConnector:
         return self.sockets[-1]
 
 
+class ManualClock:
+    """A monotonic clock that only moves when the test says so, for the session's timers."""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 def start_event(token: str, stream_sid: str = "MZ1", call_sid: str = "CA1") -> dict[str, Any]:
     return {"event": "start", "streamSid": stream_sid,
             "start": {"streamSid": stream_sid, "callSid": call_sid,

@@ -51,6 +51,14 @@ def tool_output(call_id: str, output: Any) -> dict[str, Any]:
             "item": {"type": "function_call_output", "call_id": call_id, "output": text}}
 
 
+def function_call(call_id: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """A function_call item added by the client. A result that arrives later (a background
+    job) is attached to one, so the model reads it as tool output - not as instructions."""
+    return {"type": "conversation.item.create",
+            "item": {"type": "function_call", "call_id": call_id, "name": name,
+                     "arguments": json.dumps(arguments)}}
+
+
 def create_response(instructions: str | None = None) -> dict[str, Any]:
     if instructions is None:
         return {"type": "response.create"}

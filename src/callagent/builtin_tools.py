@@ -75,9 +75,12 @@ def build_registry(settings: Settings) -> ToolRegistry:
                     log.exception("could not relay message to owner")
         return {"ok": True, "saved": True, "relayed_by_text": relayed}
 
-    @reg.tool(description=(f"Send a text message on {owner}'s behalf. Before calling this, read "
-                           "back the recipient and the exact wording and get a yes."),
-              roles=("owner",), timeout=15,
+    @reg.tool(description=(f"Send a text message on {owner}'s behalf. Nothing is sent on the "
+                           "first call: it returns needs_confirmation. Read back the recipient "
+                           "and the exact wording, and only if the caller says yes, call it "
+                           "again with the same arguments."),
+              roles=("owner",), timeout=15, confirm=True,
+              label=lambda args: f"text {args.get('to', 'someone')}",
               parameters={"type": "object", "required": ["to", "body"], "properties": {
                   "to": {"type": "string", "description": "Contact name or +E.164 number."},
                   "body": {"type": "string", "description": "Exact message text."}}})
@@ -89,9 +92,12 @@ def build_registry(settings: Settings) -> ToolRegistry:
         return {"ok": True, "to": number}
 
     @reg.tool(description=("Place a real phone call to someone on the owner's behalf to get "
-                           "something done. Runs in the background while you keep talking; "
-                           "what the other person said comes back to you when that call ends."),
-              roles=("owner",), background=True, timeout=900,
+                           "something done. The first call only proposes it (needs_confirmation)"
+                           ": say who you'll call and why, and only if the caller says yes, "
+                           "call it again with the same arguments. It then runs in the "
+                           "background while you keep talking; what the other person said "
+                           "comes back to you when that call ends."),
+              roles=("owner",), background=True, timeout=900, confirm=True,
               label=lambda args: f"calling {args.get('who', 'someone')}",
               parameters={"type": "object", "required": ["who", "goal"], "properties": {
                   "who": {"type": "string", "description": "Contact name or +E.164 number."},

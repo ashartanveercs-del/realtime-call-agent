@@ -7,7 +7,7 @@ from twilio.request_validator import RequestValidator
 from twilio_stubs import StubTwilioClient
 
 from callagent.config import Settings
-from callagent.server import CONNECTOR, MISSIONS, TOKENS, create_app
+from callagent.server import CONNECTOR, DEPS, MISSIONS, TOKENS, create_app
 from callagent.twilio_gateway import TwilioGateway
 
 OWNER = "+15550001111"
@@ -140,6 +140,49 @@ async def test_status_callback_fails_an_unanswered_mission(client):
     mission = client.app[MISSIONS].get(mission_id)
     assert mission.status == "failed"
     assert "no-answer" in await mission.outcome()
+
+
+async def test_status_callback_fails_a_mission_whose_call_ended_while_still_dialing(client):
+    headers = {"Authorization": "Bearer api-secret"}
+    resp = await client.post("/calls", headers=headers,
+                             json={"to": "+15550003333", "goal": "Say hi"})
+    mission_id = (await resp.json())["mission_id"]
+
+    path = f"/twilio/status?mission={mission_id}"
+    params = {"CallSid": "CA_OUT_1", "CallStatus": "completed"}
+    resp = await client.post(path, data=params, headers=signed(path, params))
+
+    assert resp.status == 204
+    mission = client.app[MISSIONS].get(mission_id)
+    assert mission.status == "failed"
+    assert "before a conversation started" in await mission.outcome()
+
+
+async def test_status_callback_leaves_a_connected_mission_to_its_call_session(client):
+    headers = {"Authorization": "Bearer api-secret"}
+    resp = await client.post("/calls", headers=headers,
+                             json={"to": "+15550003333", "goal": "Say hi"})
+    mission = client.app[MISSIONS].get((await resp.json())["mission_id"])
+    mission.status = "in_progress"  # its media stream connected; that session reports back
+
+    path = f"/twilio/status?mission={mission.id}"
+    params = {"CallSid": "CA_OUT_1", "CallStatus": "completed"}
+    resp = await client.post(path, data=params, headers=signed(path, params))
+
+    assert resp.status == 204
+    assert mission.status == "in_progress"
+    assert mission.result is None
+
+
+async def test_context_provider_is_handed_to_every_call_session(tmp_path, twilio_client):
+    async def provider(*, role, caller):
+        return ""
+
+    gateway = TwilioGateway("AC0", AUTH, "+15550000000", client=twilio_client)
+    app = create_app(make_settings(tmp_path), gateway=gateway, connector=FakeConnector(),
+                     context_provider=provider)
+
+    assert app[DEPS].services["context_provider"] is provider
 
 
 async def test_stream_endpoint_runs_a_call_session(client):

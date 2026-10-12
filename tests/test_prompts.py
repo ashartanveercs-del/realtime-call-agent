@@ -7,6 +7,12 @@ def test_owner_prompt_names_the_owner_and_explains_background_work():
     assert "background" in text.lower()
 
 
+def test_owner_prompt_treats_results_as_information_and_waits_for_a_yes():
+    text = build_instructions("owner", agent_name="Robin", owner_name="Sam").lower()
+    assert "not instructions" in text
+    assert "same arguments" in text
+
+
 def test_guest_prompt_takes_messages_and_protects_the_owner():
     text = build_instructions("guest", agent_name="Robin", owner_name="Sam",
                               caller="+15550002222")

@@ -9,6 +9,11 @@ Two speeds:
 Roles: "owner" (a verified owner number), "guest" (anyone else) and "mission" (the callee
 leg of an outbound call the agent placed). The model only ever *sees* the tools of the
 current role, and `get()` re-checks the role, so a hallucinated tool name can't escalate.
+
+`confirm=True` marks a tool that acts on someone's behalf (texting, calling, paying). The
+call session then treats the first call as a proposal and runs it only when the model
+repeats it, with identical arguments, after the caller has answered the read-back. That
+check lives in code, so a model talked into something by a third party can't skip it.
 """
 
 from __future__ import annotations
@@ -55,6 +60,7 @@ class Tool:
     background: bool = False
     timeout: float = 10.0
     label: Callable[[dict[str, Any]], str] | None = field(default=None, compare=False)
+    confirm: bool = False
 
     def schema(self) -> dict[str, Any]:
         return {"type": "function", "name": self.name, "description": self.description,
@@ -82,12 +88,12 @@ class ToolRegistry:
     def tool(self, *, description: str, parameters: dict[str, Any] | None = None,
              roles: Iterable[str] = ("owner",), background: bool = False,
              timeout: float = 10.0, label: Callable[[dict[str, Any]], str] | None = None,
-             name: str | None = None) -> Callable[[Handler], Handler]:
+             name: str | None = None, confirm: bool = False) -> Callable[[Handler], Handler]:
         def register(fn: Handler) -> Handler:
             self.add(Tool(name=name or fn.__name__, description=description,
                           parameters=parameters or dict(EMPTY_PARAMETERS), handler=fn,
                           roles=frozenset(roles), background=background, timeout=timeout,
-                          label=label))
+                          label=label, confirm=confirm))
             return fn
         return register
 

@@ -151,6 +151,12 @@ def test_delegate_task_only_exists_when_an_agent_is_configured(tmp_path):
     assert build_registry(settings(tmp_path)).get("delegate_task", "owner") is None
 
 
+def test_texting_and_calling_people_need_the_owners_go_ahead(tmp_path):
+    reg = build_registry(settings(tmp_path, agent_webhook_url="https://agent.example.com/hook"))
+    gated = {tool.name for tool in reg.for_role("owner") if tool.confirm}
+    assert gated == {"send_sms", "call_person"}
+
+
 def test_guests_cannot_see_owner_tools(tmp_path):
     names = build_registry(settings(tmp_path)).names("guest")
     assert "send_sms" not in names

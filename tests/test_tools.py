@@ -59,6 +59,21 @@ def test_decorator_registers_handler_with_sensible_defaults():
     assert tool.describe({}) == "current_time"
 
 
+def test_tools_that_act_for_someone_can_require_confirmation():
+    reg = ToolRegistry()
+
+    @reg.tool(description="Pay a bill.", confirm=True)
+    async def pay_bill(ctx):
+        return "paid"
+
+    @reg.tool(description="Tell the time.")
+    async def current_time(ctx):
+        return "noon"
+
+    assert reg.get("pay_bill", "owner").confirm is True
+    assert reg.get("current_time", "owner").confirm is False
+
+
 def test_label_function_describes_a_job_for_progress_updates():
     reg = ToolRegistry()
 
