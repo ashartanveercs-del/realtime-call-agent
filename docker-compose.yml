@@ -1,0 +1,14 @@
+services:
+  callagent:
+    build: .
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    ports:
+      - "8080:8080"
+    volumes:
+      - calldata:/data
+    restart: unless-stopped
+
+volumes:
+  calldata:
