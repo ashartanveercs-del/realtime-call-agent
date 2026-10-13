@@ -17,7 +17,7 @@ and when a background result can safely enter the conversation.
 
 | Hard problem | Implementation | Reproducible evidence |
 | --- | --- | --- |
-| Interrupting buffered speech | A playout timeline truncates every interrupted model item to the audio the caller heard, including replies still queued behind it. | [Playback edge cases](tests/test_audio.py), [whole-call tests](tests/test_session.py) |
+| Interrupting buffered speech | A stream-clock playout estimate truncates every interrupted model item, including replies still queued behind it. | [Playback edge cases](tests/test_audio.py), [whole-call tests](tests/test_session.py) |
 | Slow tools during a live conversation | Bounded, deduplicated background jobs feed a response queue that waits for both caller and model turns. | [Job lifecycle tests](tests/test_jobs.py), [result delivery tests](tests/test_session.py) |
 | Caller identity and action boundaries | Signed webhooks mint single-use stream tokens; role checks and exact-argument proposals sit in the tool dispatch path. | [HTTP and input validation](tests/test_server.py), [token replay tests](tests/test_tokens.py) |
 
@@ -53,11 +53,11 @@ Agent:  "The bakery says your cake is ready and they're open until 7."
 | | |
 |---|---|
 | **Speech-to-speech, no transcoding** | Twilio Media Streams deliver G.711 μ-law at 8 kHz; the Realtime API accepts and emits the same format (`audio/pcmu`), so audio frames are relayed untouched in both directions. |
-| **Barge-in that matches what was heard** | When the caller interrupts, playback is flushed and the model's memory is truncated to the exact millisecond the caller actually heard, not what was sent. This holds even when another reply is still queued behind the one playing. |
+| **Playback-aware barge-in** | When the caller interrupts, playback is flushed and model items are truncated to the playout tracker's millisecond estimate, including replies still queued behind the one playing. The estimate uses stream timestamps and audio durations; it does not measure physical audibility. |
 | **Two-speed tools** | Fast tools answer inline. Slow ones run as background jobs, deduplicated and capped, so the conversation never stalls. Their results are spoken only when the caller can hear them. |
 | **Outbound "missions"** | `call_person` (or `POST /calls`) phones someone to pursue a goal. The callee leg is its own AI session; its transcript comes back as the result. |
 | **Caller roles** | Owner, guest and mission callers each get a different persona and a different set of tools. Guests can only leave a message, which is relayed to you by SMS. |
-| **Secure by default** | Twilio webhook signatures are verified, streams are bound by one-time tokens, and owner mode can require STIR/SHAKEN attestation. Tool access is checked server-side and errors are never read aloud. Texting or calling someone needs the owner's spoken go-ahead, which is enforced in code. Background results, including what other people said on a mission call, reach the model as tool output and never as system messages. |
+| **Gated integration boundaries** | Twilio webhook signatures are verified, streams are bound by one-time tokens, and owner mode can require STIR/SHAKEN attestation. Tool access is checked server-side and known tool errors are replaced with generic messages. Texting or calling first creates an exact-argument proposal; execution requires a matching call after the caller's next utterance. The model interprets that utterance. Background results reach the model as tool output, never as system messages. |
 | **Call hygiene** | Silence gets a nudge and then a goodbye. There's a hard time limit. Hang-up waits, up to a short grace period, for the caller to finish speaking and the goodbye to finish playing. Long tasks get progress updates. |
 | **Observability** | Every call writes a JSONL transcript and a summary with token usage and an optional cost estimate. |
 | **Tested without a phone** | 139 tests drive whole calls through in-memory fakes of Twilio and the model, covering barge-in, turn-taking, background jobs, confirmations, hang-ups, missions and the HTTP layer. |
@@ -108,7 +108,7 @@ time, so "bytes sent" overstates what was played. Twilio's inbound frames carry 
 stream-clock timestamp, and Twilio plays the audio it receives back to back. So each chunk
 gets a slot on a playout timeline. The slot starts when the audio queued ahead of it runs
 out, or on arrival if the line is idle, and lasts as long as the chunk's audio. What the
-caller heard of a reply is the part of its slots that the stream clock has already passed
+tracker estimates was heard of a reply is the part of its slots that the stream clock has already passed
 ([`audio.py`](src/callagent/audio.py)). This stays correct when a second reply is queued
 behind the first. On barge-in the session sends Twilio a `clear` and the model a
 `response.cancel`. It then sends a `conversation.item.truncate` for every reply that wasn't
@@ -137,13 +137,14 @@ so it decides the caller's role and mints a single-use token. The token goes ins
 `<Stream>` parameters. A WebSocket without an unused, unexpired token is hung up before any
 model session opens.
 
-**5. Other people's words are data, not orders.** A mission call's transcript is a stranger
+**5. Other people's words enter through the data boundary.** A mission call's transcript is a stranger
 talking, and a delegated task's answer comes from another system. Both reach the model as
 tool output attached to a function call item, never as a system message. A prompt alone
 can't stop a model that has been talked into something, so tools that act on the owner's
 behalf are also gated in code ([`session.py`](src/callagent/session.py)). The first
 `send_sms` or `call_person` call only proposes the action. It runs when the model repeats the
-call with identical arguments right after the owner's next utterance.
+call with identical arguments right after the owner's next utterance. Code enforces that
+sequence; the model is responsible for asking the question and interpreting the answer.
 
 ## Quick start
 
@@ -186,8 +187,8 @@ never waits forever.
 | `end_call` | all | fast | Hangs up after the goodbye has finished playing |
 | `current_time` | all | fast | Local date and time in `TIMEZONE`, phrased for speech |
 | `take_message` | guest | fast | Saves the message and texts it to the owner |
-| `send_sms` | owner | fast | Texts a contact or number once the owner confirms the read-back (enforced server-side) |
-| `call_person` | owner | background | Once the owner confirms, places a mission call and reports what was said |
+| `send_sms` | owner | fast | Texts a contact or number after a matching proposal and the caller's next utterance; the model interprets confirmation |
+| `call_person` | owner | background | Uses the same proposal sequence, then places a mission call and reports what was said |
 | `delegate_task` | owner | background | Hands any task to your own agent over a webhook (enabled when `AGENT_WEBHOOK_URL` is set) |
 
 ### Add your own
@@ -210,7 +211,8 @@ app = create_app(settings, registry=registry)
 Pass `background=True` for anything that takes more than a couple of seconds, and give it a
 `label` so progress updates sound natural. Pass `confirm=True` for tools that act on someone's
 behalf (sending, booking, paying). The first call then only proposes the action, and it runs
-once the model repeats it after the caller's go-ahead. Return `ToolResult(..., respond=False)`
+once the model repeats it after the caller's next utterance. The model must interpret the
+answer as approval; the server checks timing and identical arguments. Return `ToolResult(..., respond=False)`
 when the model shouldn't speak after the tool. A runnable example is in
 [`examples/custom_tools.py`](examples/custom_tools.py).
 
@@ -269,11 +271,11 @@ against a local WebSocket server.
   tools to actions you're comfortable gating that way.
 - Guests only ever see guest tools. The model can't call a tool outside the caller's role even
   if it hallucinates the name.
-- Texting and calling people need the owner's go-ahead, and so does any tool registered with
-  `confirm=True`. The first call only returns a proposal. The session runs the action only when
-  the model repeats it with identical arguments right after the owner's next utterance. That
-  proves the owner was asked and answered, but the model still decides whether the answer was
-  a yes, so keep truly high-stakes actions behind checks of your own.
+- Tools registered with `confirm=True` first return a proposal. The session runs the action
+  only when the model repeats it with identical arguments right after the owner's next
+  utterance. Code enforces that sequence; it does not independently verify that a read-back
+  was spoken or that the answer meant yes. Use an independently authenticated approval
+  mechanism for actions that require that stronger guarantee.
 - Background results reach the model as tool output marked as untrusted, never as system
   messages. That includes what the other person said on a mission call. `delegate_task` hands
   requests to your own agent, which should confirm its own side effects.

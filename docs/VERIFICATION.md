@@ -35,6 +35,8 @@ handler. The corrected boundary returns HTTP 400 without creating an outbound ca
   no provider credentials and place no phone calls or SMS messages.
 - The demo checks the production playout tracker; it does not measure carrier latency,
   speech quality, or live model behavior. No sub-second latency guarantee is claimed.
+- Playout is estimated from stream timestamps and audio durations, rather than physical
+  audibility. Before any stream timestamp is available, the tracker assumes sent audio played.
 - Role gates run in code. Spoken confirmation still depends on the model interpreting the
   caller's answer; it is not an independently authenticated approval token.
 - Caller-number matching alone is not identity proof. The optional attestation gate and
