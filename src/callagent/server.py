@@ -121,8 +121,12 @@ def create_app(settings: Settings, *, gateway: Any | None = None,
             body = await request.json()
         except ValueError:
             return web.json_response({"error": "body must be JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "body must be a JSON object"}, status=400)
+        if not isinstance(body.get("goal", ""), str):
+            return web.json_response({"error": "'goal' must be text"}, status=400)
         to = normalise_number(str(body.get("to", "")))
-        goal = str(body.get("goal", "")).strip()
+        goal = body.get("goal", "").strip()
         if not is_e164(to):
             return web.json_response({"error": "'to' must be an E.164 number, e.g. "
                                                "+15551234567"}, status=400)

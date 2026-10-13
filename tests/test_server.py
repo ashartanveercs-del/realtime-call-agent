@@ -1,4 +1,5 @@
 import asyncio
+import json
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -105,6 +106,30 @@ async def test_calls_api_validates_input(client):
     assert resp.status == 400
     resp = await client.post("/calls", json={"to": "+15550003333", "goal": ""}, headers=headers)
     assert resp.status == 400
+
+
+@pytest.mark.parametrize("payload", [[], ["call"], None, "call", 42, True])
+async def test_calls_api_rejects_non_object_json_before_dialing(client, twilio_client, payload):
+    resp = await client.post(
+        "/calls", data=json.dumps(payload),
+        headers={"Authorization": "Bearer api-secret", "Content-Type": "application/json"},
+    )
+
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "body must be a JSON object"
+    assert twilio_client.calls.created == []
+
+
+@pytest.mark.parametrize("goal", [None, 123, True, ["Say hi"], {"text": "Say hi"}])
+async def test_calls_api_rejects_non_text_goals_before_dialing(client, twilio_client, goal):
+    resp = await client.post(
+        "/calls", json={"to": "+15550003333", "goal": goal},
+        headers={"Authorization": "Bearer api-secret"},
+    )
+
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "'goal' must be text"
+    assert twilio_client.calls.created == []
 
 
 async def test_calls_api_places_a_mission_call(client, twilio_client):

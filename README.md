@@ -1,13 +1,43 @@
 # realtime-call-agent
 
-**A real-time AI phone agent.** Call a Twilio number and talk to a speech-to-speech model
-(OpenAI Realtime) that answers in well under a second, can be interrupted mid-sentence, runs
-slow tasks in the background while it keeps talking, and can phone other people on your
-behalf and report back.
+**Interruptible voice agents with playback-aware memory and concurrent background tools.**
+Bridge Twilio Media Streams to OpenAI Realtime, keep talking while slow work runs, and launch
+outbound call missions. The session coordinates what was generated, what was actually heard,
+and when a background result can safely enter the conversation.
 
 [![CI](https://github.com/ashartanveercs-del/realtime-call-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/ashartanveercs-del/realtime-call-agent/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Tests](https://img.shields.io/badge/offline_tests-139-brightgreen)
+
+[Try the offline demo](#try-the-interruption-engine-offline) · [Architecture](#architecture) ·
+[Integrate your agent](#plug-in-your-own-agent) · [Verification](docs/VERIFICATION.md)
+
+## Engineering highlights
+
+| Hard problem | Implementation | Reproducible evidence |
+| --- | --- | --- |
+| Interrupting buffered speech | A playout timeline truncates every interrupted model item to the audio the caller heard, including replies still queued behind it. | [Playback edge cases](tests/test_audio.py), [whole-call tests](tests/test_session.py) |
+| Slow tools during a live conversation | Bounded, deduplicated background jobs feed a response queue that waits for both caller and model turns. | [Job lifecycle tests](tests/test_jobs.py), [result delivery tests](tests/test_session.py) |
+| Caller identity and action boundaries | Signed webhooks mint single-use stream tokens; role checks and exact-argument proposals sit in the tool dispatch path. | [HTTP and input validation](tests/test_server.py), [token replay tests](tests/test_tokens.py) |
+
+### Try the interruption engine offline
+
+```bash
+python -m pip install -e ".[dev]"
+python examples/barge_in_demo.py
+```
+
+```text
+Caller interrupts at | A heard | B heard | Truncate these items
+                1600 |     600 |       0 | [('answer-A', 600), ('answer-B', 0)]
+                3500 |    2000 |     500 | [('answer-B', 500)]
+                5000 |    2000 |    2000 | []
+```
+
+This executes the same tracker used by live call sessions, checks the expected cut points,
+and exits with an error if they change. No phone, credentials, or network connection needed.
+The conversation below illustrates the live integration flow.
 
 ```text
 Owner:  "Hey, can you call the bakery and check if my cake is ready, and text Alex I'm running late?"
@@ -30,7 +60,7 @@ Agent:  "The bakery says your cake is ready and they're open until 7."
 | **Secure by default** | Twilio webhook signatures are verified, streams are bound by one-time tokens, and owner mode can require STIR/SHAKEN attestation. Tool access is checked server-side and errors are never read aloud. Texting or calling someone needs the owner's spoken go-ahead, which is enforced in code. Background results, including what other people said on a mission call, reach the model as tool output and never as system messages. |
 | **Call hygiene** | Silence gets a nudge and then a goodbye. There's a hard time limit. Hang-up waits, up to a short grace period, for the caller to finish speaking and the goodbye to finish playing. Long tasks get progress updates. |
 | **Observability** | Every call writes a JSONL transcript and a summary with token usage and an optional cost estimate. |
-| **Tested without a phone** | 128 tests drive whole calls through in-memory fakes of Twilio and the model, covering barge-in, turn-taking, background jobs, confirmations, hang-ups, missions and the HTTP layer. |
+| **Tested without a phone** | 139 tests drive whole calls through in-memory fakes of Twilio and the model, covering barge-in, turn-taking, background jobs, confirmations, hang-ups, missions and the HTTP layer. |
 
 ## Architecture
 
@@ -219,8 +249,9 @@ the OpenAI Agents SDK, the Claude Agent SDK or anything else behind it.
 ## Testing
 
 ```bash
-pytest            # 128 tests, ~4 s, no network or phone needed
-ruff check src tests
+pytest            # 139 tests; no external services or phone needed
+ruff check src tests examples
+python examples/barge_in_demo.py
 ```
 
 [`tests/fakes.py`](tests/fakes.py) provides in-memory sockets for the Twilio stream and the
