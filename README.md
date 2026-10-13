@@ -295,6 +295,11 @@ example, the TCPA in the US). Don't use this for unsolicited or bulk calling.
 - WebRTC / browser client alongside the phone line
 - Multi-language voice and auto language detection
 
+## Secret scanning
+
+[Full-history audit and secret-scan CI](docs/SECURITY-AUDIT.md). Configuration examples and
+synthetic fixtures were reviewed before publication; new credential findings fail the gate.
+
 ## License
 
 MIT
